@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { extend, useFrame, useThree } from "@react-three/fiber";
 import {
   PerspectiveCamera as PerspectiveCameraImpl,
   OrthographicCamera as OrthographicCameraImpl,
@@ -26,11 +26,12 @@ export function Camera() {
 
   const controls = useMemo(() => new Controls(gl.domElement), [gl.domElement]);
 
+  useEffect(() => {
+    extend({ CameraControlsImpl: controls.object });
+  }, [controls]);
+
   useFrame((state, delta) => {
     controls.update(delta);
-  }, 1);
-
-  useFrame((state) => {
     gl.render(state.scene, controls.currentCamera);
   }, 1);
 
@@ -44,9 +45,10 @@ export function Camera() {
     return () => set({ controls: oldControls, camera: oldCamera });
   }, [controls, get, set]);
 
-  return null;
+  return <primitive object={controls.object} />;
 }
 
+// https://gist.github.com/nickyvanurk/9ac33a6aff7dd7bd5cd5b8a20d4db0dc
 class Controls {
   perspectiveCamera: PerspectiveCameraImpl;
   orthographicCamera: OrthographicCameraImpl;
@@ -69,8 +71,8 @@ class Controls {
       4000
     );
     this.currentCamera = this.perspectiveCamera;
-    this.currentCamera.position.set(0, 0, 5);
-    this.currentCamera.lookAt(0, 1, 0);
+    this.currentCamera.position.set(1, 1, 5);
+    this.currentCamera.lookAt(1, 1, 1);
 
     const subsetOfTHREE = {
       Vector2: Vector2,
@@ -88,7 +90,6 @@ class Controls {
 
     this.object = new CameraControlsImpl(this.currentCamera);
     this.object.connect(this.container);
-    this.object.smoothTime = 0.2;
   }
 
   dispose() {
@@ -112,6 +113,7 @@ class Controls {
     const distance = this.orthographicCamera.position.distanceTo(
       this.object.getTarget(new Vector3())
     );
+
     const halfWidth =
       frustumWidthAtDistance(this.perspectiveCamera, distance) / 2;
     const halfHeight =
@@ -133,18 +135,18 @@ class Controls {
   setOrthographicCamera() {
     this.orthographicCamera.position.copy(this.perspectiveCamera.position);
     this.updateOrthographicCameraFrustum();
-    this.orthographicCamera.updateProjectionMatrix();
     this.currentCamera = this.orthographicCamera;
     this.object.camera = this.orthographicCamera;
+    this.orthographicCamera.updateProjectionMatrix();
   }
 
   setPerspectiveCamera() {
     const oldY = this.perspectiveCamera.position.y;
     this.perspectiveCamera.position.copy(this.orthographicCamera.position);
     this.perspectiveCamera.position.y = oldY / this.orthographicCamera.zoom;
-    this.perspectiveCamera.updateProjectionMatrix();
     this.currentCamera = this.perspectiveCamera;
     this.object.camera = this.perspectiveCamera;
+    this.perspectiveCamera.updateProjectionMatrix();
   }
 }
 

@@ -62,7 +62,7 @@ const GizmoViewCube = () => {
     const { face, eventObject, stopPropagation } = event;
     stopPropagation();
 
-    console.log(eventObject);
+    // console.log(eventObject);
 
     if (eventObject.position.length() === 0) {
       tweenCamera(face ? face.normal : eventObject.position);
