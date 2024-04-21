@@ -1,28 +1,18 @@
 import { GizmoHelper, GizmoViewcube } from "@react-three/drei";
-import { RootState, ThreeEvent, useThree } from "@react-three/fiber";
-import { EffectComposer, Grid } from "@react-three/postprocessing";
+import { ThreeEvent, useThree } from "@react-three/fiber";
 
-import { Suspense, useEffect, useRef } from "react";
-import { Box3, Spherical, Vector3, Sphere, Group, Scene } from "three";
-import CameraControlsImpl, { EventDispatcher } from "camera-controls";
+import { useEffect, useRef } from "react";
+import { Spherical, Vector3, Group, Scene, EventDispatcher } from "three";
+import { fitCameraToSceneBoundingSphere } from "./camera-view";
+import CameraControls from "camera-controls";
 
-const sphere = new Sphere();
 const sphericalCoords = new Spherical();
-const boundingBox = new Box3();
-const center = new Vector3();
 const pos = new Vector3();
-const defaultRadius = 1;
-const enableTransition = true;
-
-const X = "X";
-const Y = "Y";
-const Z = "Z";
 
 const GizmoViewCube = () => {
   const scene = useThree<Scene>((state) => state.scene);
-  const controls = useThree((state) => state.controls);
-
-  console.log(controls);
+  const controls = useThree((state) => state.controls) as EventDispatcher &
+    CameraControls;
   const group = useRef<Group | null>(null);
 
   useEffect(() => {
@@ -41,20 +31,10 @@ const GizmoViewCube = () => {
       pos.set(position.x, position.y, position.z)
     );
 
-    const bbox = boundingBox.setFromObject(scene);
-
-    if (controls.fitToSphere) {
-      // https://stackoverflow.com/a/63243915/11416728
-      controls.fitToSphere(
-        bbox.getBoundingSphere(
-          sphere.set(bbox.getCenter(center), defaultRadius)
-        ),
-        enableTransition
-      );
-    }
+    fitCameraToSceneBoundingSphere(controls, scene);
 
     if (controls.rotateTo) {
-      controls.rotateTo(point.theta, point.phi, enableTransition);
+      controls.rotateTo(point.theta, point.phi, true);
     }
   };
 
@@ -74,32 +54,18 @@ const GizmoViewCube = () => {
   };
 
   return (
-    <>
-      <GizmoHelper
-        margin={[80, 80]}
-        alignment="bottom-center"
-        renderPriority={2}
-      >
-        <group ref={group}>
-          <GizmoViewcube
-            onClick={onClick}
-            color="#1F78FF"
-            textColor="#FFFFFF"
-            hoverColor="#bbdeff"
-            strokeColor="#000000"
-            // faces={[X, Y, Z, Y, Z, X]}
-            // opacity={0.8}
-            font="20px Arial"
-          />
-        </group>
-      </GizmoHelper>
-
-      {/* <Suspense fallback={null}>
-        <EffectComposer>
-          <Grid scale={0.1} />
-        </EffectComposer>
-      </Suspense> */}
-    </>
+    <GizmoHelper margin={[80, 80]} alignment="bottom-center" renderPriority={2}>
+      <group ref={group}>
+        <GizmoViewcube
+          onClick={onClick}
+          color="#1F78FF"
+          textColor="#FFFFFF"
+          hoverColor="#bbdeff"
+          strokeColor="#000000"
+          font="20px Arial"
+        />
+      </group>
+    </GizmoHelper>
   );
 };
 

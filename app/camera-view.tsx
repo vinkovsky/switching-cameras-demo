@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { extend, useFrame, useThree } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import {
   PerspectiveCamera as PerspectiveCameraImpl,
   OrthographicCamera as OrthographicCameraImpl,
@@ -13,27 +13,34 @@ import {
   Raycaster,
   Sphere,
   EventDispatcher,
+  Scene,
 } from "three";
 import CameraControlsImpl from "camera-controls";
 
 export function Camera() {
-  const { set, gl, get, camera } = useThree(({ get, set, gl, camera }) => ({
-    get,
-    set,
-    gl,
-    camera,
-  }));
+  const gl = useThree((state) => state.gl);
 
-  const controls = useMemo(() => new Controls(gl.domElement), [gl.domElement]);
+  const set = useThree((state) => state.set);
+  const get = useThree((state) => state.get);
+  const scene = useThree((state) => state.scene);
+
+  const controls = useMemo(
+    () => new Controls(gl.domElement, scene),
+    [gl.domElement, scene]
+  );
 
   useEffect(() => {
-    extend({ CameraControlsImpl: controls.object });
-  }, [controls]);
+    if (scene.children.length) {
+      fitCameraToSceneBoundingSphere(controls.object, scene);
+    }
 
-  useFrame((state, delta) => {
+    console.log("scene.children.length", scene.children.length);
+  }, [controls.object, scene.children]);
+
+  useFrame((_, delta) => {
     controls.update(delta);
-    gl.render(state.scene, controls.currentCamera);
-  }, 1);
+    gl.render(scene, controls.currentCamera);
+  }, -1);
 
   useEffect(() => {
     const oldControls = get().controls;
@@ -45,7 +52,12 @@ export function Camera() {
     return () => set({ controls: oldControls, camera: oldCamera });
   }, [controls, get, set]);
 
-  return <primitive object={controls.object} />;
+  return (
+    <>
+      <primitive object={controls.object} />
+      <primitive object={controls.currentCamera} />
+    </>
+  );
 }
 
 // https://gist.github.com/nickyvanurk/9ac33a6aff7dd7bd5cd5b8a20d4db0dc
@@ -55,7 +67,7 @@ class Controls {
   currentCamera: PerspectiveCameraImpl | OrthographicCameraImpl;
   object: CameraControlsImpl;
 
-  constructor(private container: HTMLElement) {
+  constructor(private container: HTMLElement, private scene: Scene) {
     this.perspectiveCamera = new PerspectiveCameraImpl(
       70,
       this.container.clientWidth / this.container.clientHeight,
@@ -71,8 +83,6 @@ class Controls {
       4000
     );
     this.currentCamera = this.perspectiveCamera;
-    this.currentCamera.position.set(1, 1, 5);
-    this.currentCamera.lookAt(1, 1, 1);
 
     const subsetOfTHREE = {
       Vector2: Vector2,
@@ -88,8 +98,11 @@ class Controls {
 
     CameraControlsImpl.install({ THREE: subsetOfTHREE });
 
-    this.object = new CameraControlsImpl(this.currentCamera);
-    this.object.connect(this.container);
+    this.object = new CameraControlsImpl(this.currentCamera, this.container);
+    this.object.setPosition(1, 1, 1);
+    this.object.setTarget(0, 0, 0);
+    this.object.restThreshold = 0.1;
+    this.object.dollyToCursor = true;
   }
 
   dispose() {
@@ -98,7 +111,7 @@ class Controls {
   }
 
   update(delta: number) {
-    if (this.object.polarAngle <= 0.001) {
+    if (this.object.polarAngle <= 0.01) {
       if (this.currentCamera.type === "PerspectiveCamera") {
         this.setOrthographicCamera();
       }
@@ -110,9 +123,7 @@ class Controls {
   }
 
   private updateOrthographicCameraFrustum() {
-    const distance = this.orthographicCamera.position.distanceTo(
-      this.object.getTarget(new Vector3())
-    );
+    const { distance } = this.object;
 
     const halfWidth =
       frustumWidthAtDistance(this.perspectiveCamera, distance) / 2;
@@ -164,3 +175,23 @@ function frustumWidthAtDistance(
 ) {
   return frustumHeightAtDistance(camera, distance) * camera.aspect;
 }
+
+export const fitCameraToSceneBoundingSphere = (
+  controls: CameraControlsImpl,
+  scene: Scene
+) => {
+  const boundingBox = new Box3();
+  const center = new Vector3();
+  const sphere = new Sphere();
+
+  const defaultRadius = 1;
+  const bbox = boundingBox.setFromObject(scene);
+
+  if (controls.fitToSphere) {
+    // https://stackoverflow.com/a/63243915/11416728
+    controls.fitToSphere(
+      bbox.getBoundingSphere(sphere.set(bbox.getCenter(center), defaultRadius)),
+      true
+    );
+  }
+};
