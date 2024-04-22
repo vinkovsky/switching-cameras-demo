@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
   PerspectiveCamera as PerspectiveCameraImpl,
@@ -14,48 +14,194 @@ import {
   Sphere,
   EventDispatcher,
   Scene,
+  Group,
 } from "three";
 import CameraControlsImpl from "camera-controls";
+import {
+  CameraControls,
+  OrthographicCamera,
+  PerspectiveCamera,
+} from "@react-three/drei";
 
+// export function Camera() {
+//   const gl = useThree((state) => state.gl);
+
+//   const set = useThree((state) => state.set);
+//   const get = useThree((state) => state.get);
+//   const scene = useThree((state) => state.scene);
+
+//   const controls = useMemo(
+//     () => new Controls(gl.domElement, scene),
+//     [gl.domElement, scene]
+//   );
+
+//   useEffect(() => {
+//     if (scene.children.length) {
+//       fitCameraToSceneBoundingSphere(controls.object, scene);
+//     }
+
+//     console.log("scene.children.length", scene.children.length);
+//   }, [controls.object, scene.children]);
+
+//   useFrame((_, delta) => {
+//     controls.update(delta);
+//     gl.render(scene, controls.currentCamera);
+//   }, -1);
+
+//   useEffect(() => {
+//     const oldControls = get().controls;
+//     const oldCamera = get().camera;
+//     set({
+//       controls: controls.object as unknown as EventDispatcher,
+//       camera: controls.currentCamera,
+//     });
+//     return () => set({ controls: oldControls, camera: oldCamera });
+//   }, [controls, get, set]);
+
+//   return (
+//     <>
+//       <primitive object={controls.object} />
+//       <primitive object={controls.currentCamera} />
+//     </>
+//   );
+// }
+
+// https://discourse.threejs.org/t/how-to-animation-switch-camera-from-perspective-to-orthographic-like-3d-program-maya-blender-unity-etc-in-three-js/9470/5
 export function Camera() {
+  const [oldType, setOldType] = useState("PerspectiveCamera");
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+
   const gl = useThree((state) => state.gl);
+  const camera = useThree((state) => state.camera);
 
-  const set = useThree((state) => state.set);
-  const get = useThree((state) => state.get);
-  const scene = useThree((state) => state.scene);
+  const proxyRef = useRef<Group>(null);
+  const cameraControlsRef = useRef<CameraControlsImpl>(null);
+  const orthographicRef = useRef<OrthographicCameraImpl>(null);
+  const perspectiveRef = useRef<PerspectiveCameraImpl>(null);
 
-  const controls = useMemo(
-    () => new Controls(gl.domElement, scene),
-    [gl.domElement, scene]
-  );
+  const { set } = useThree(({ get, set }) => ({ get, set }));
 
   useEffect(() => {
-    if (scene.children.length) {
-      fitCameraToSceneBoundingSphere(controls.object, scene);
-    }
+    set({ camera: perspectiveRef.current! });
 
-    console.log("scene.children.length", scene.children.length);
-  }, [controls.object, scene.children]);
+    const handleWindowMouseMove = (event: {
+      clientX: number;
+      clientY: number;
+    }) => {
+      setCoords({ x: event.clientX, y: event.clientY });
+
+      gl.domElement.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 1,
+          pointerType: "mouse",
+          clientX: event.clientX,
+          clientY: event.clientY,
+        })
+      );
+    };
+    window.addEventListener("mousemove", handleWindowMouseMove);
+
+    return () => window.removeEventListener("mousemove", handleWindowMouseMove);
+  }, []);
 
   useFrame((_, delta) => {
-    controls.update(delta);
-    gl.render(scene, controls.currentCamera);
-  }, -1);
+    // HACK: Mouse capture resets when switching cameras because MapControls creates a new instance
+    // of itself. The group element and proxyRef is part of this hack in order to keep the MapControls
+    // target property from resetting.
+    console.log(cameraControlsRef.current);
+    if (camera.type !== oldType) {
+      const exec = gl.domElement.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 1,
+          pointerType: "mouse",
+          clientX: coords.x,
+          clientY: coords.y,
+        })
+      );
+      console.log(exec);
+      setOldType(camera.type);
+    }
 
-  useEffect(() => {
-    const oldControls = get().controls;
-    const oldCamera = get().camera;
-    set({
-      controls: controls.object as unknown as EventDispatcher,
-      camera: controls.currentCamera,
-    });
-    return () => set({ controls: oldControls, camera: oldCamera });
-  }, [controls, get, set]);
+    // console.log({
+    //   button: 0,
+    //   pointerType: "mouse",
+    //   clientX: coords.x,
+    //   clientY: coords.y,
+    // });
+
+    if (!cameraControlsRef.current || !proxyRef.current) return;
+
+    if (cameraControlsRef.current !== proxyRef.current.userData["controls"]) {
+      if (proxyRef.current.userData["controls"]) {
+        cameraControlsRef.current
+          .getTarget(new Vector3())
+          .copy(proxyRef.current.userData["controls"].getTarget(new Vector3()));
+        cameraControlsRef.current.update(delta);
+      }
+      proxyRef.current.userData["controls"] = cameraControlsRef.current;
+    }
+
+    const angle = cameraControlsRef.current.polarAngle;
+
+    if (+angle.toFixed(2) === 0.0) {
+      if (
+        camera.type === "OrthographicCamera" ||
+        !orthographicRef.current ||
+        !perspectiveRef.current ||
+        !cameraControlsRef.current
+      )
+        return;
+
+      orthographicRef.current.position.copy(perspectiveRef.current.position);
+      const distance = cameraControlsRef.current.distance;
+      const halfWidth =
+        frustumWidthAtDistance(perspectiveRef.current, distance) / 2;
+      const halfHeight =
+        frustumHeightAtDistance(perspectiveRef.current, distance) / 2;
+
+      orthographicRef.current.top = halfHeight;
+      orthographicRef.current.bottom = -halfHeight;
+      orthographicRef.current.left = -halfWidth;
+      orthographicRef.current.right = halfWidth;
+      orthographicRef.current.zoom = 1;
+      orthographicRef.current.lookAt(
+        cameraControlsRef.current.getTarget(new Vector3())
+      );
+      orthographicRef.current.updateProjectionMatrix();
+
+      set({ camera: orthographicRef.current });
+    } else if (camera.type === "OrthographicCamera") {
+      if (
+        !orthographicRef.current ||
+        !perspectiveRef.current ||
+        !cameraControlsRef.current
+      )
+        return;
+
+      const oldY = perspectiveRef.current.position.y;
+      perspectiveRef.current.position.copy(orthographicRef.current.position);
+      perspectiveRef.current.position.y = oldY / orthographicRef.current.zoom;
+      perspectiveRef.current.updateProjectionMatrix();
+
+      set({ camera: perspectiveRef.current });
+    }
+  });
+
+  useFrame((state) => {
+    gl.render(state.scene, camera);
+  }, 1);
 
   return (
     <>
-      <primitive object={controls.object} />
-      <primitive object={controls.currentCamera} />
+      <group ref={proxyRef}></group>
+      <CameraControls ref={cameraControlsRef} domElement={gl.domElement} />
+      <PerspectiveCamera
+        ref={perspectiveRef}
+        position={[0, 0, 5]}
+        fov={70}
+        far={4000}
+      />
+      <OrthographicCamera ref={orthographicRef} near={1} far={4000} />
     </>
   );
 }
